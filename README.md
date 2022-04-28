@@ -61,14 +61,14 @@ Under "SPONSORS ADD INFO HERE" heading below, include the following:
 
 ---
 
-# Metapriest contest details
+# FactoryDAO contest details
 - $47,500 DAI main award pot
 - $2,500 DAI gas optimization award pot
 - Join [C4 Discord](https://discord.gg/code4rena) to register
-- Submit findings [using the C4 form](https://code4rena.com/contests/2022-04-metapriest-contest/submit)
+- Submit findings [using the C4 form](https://code4rena.com/contests/2022-05-factorydao-contest/submit)
 - [Read our guidelines for more details](https://docs.code4rena.com/roles/wardens)
-- Starts April 28, 2022 00:00 UTC
-- Ends May 02, 2022 23:59 UTC
+- Starts May 4, 2022 00:00 UTC
+- Ends May 08, 2022 23:59 UTC
 
 This repo will be made public before the start of the contest. (C4 delete this line when made public)
 
