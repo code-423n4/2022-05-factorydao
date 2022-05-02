@@ -24,15 +24,15 @@ Some of the checklists in this doc are for **C4 (🐺)** and some of them are fo
 
 Under "SPONSORS ADD INFO HERE" heading below, include the following:
 
-- [ ] Name of each contract and:
-  - [ ] source lines of code (excluding blank lines and comments) in each
-  - [ ] external contracts called in each
-  - [ ] libraries used in each
-- [ ] Describe any novel or unique curve logic or mathematical models implemented in the contracts
-- [ ] Does the token conform to the ERC-20 standard? In what specific ways does it differ?
-- [ ] Describe anything else that adds any special logic that makes your approach unique
-- [ ] Identify any areas of specific concern in reviewing the code
-- [ ] Add all of the code to this repo that you want reviewed
+- [x] Name of each contract and:
+  - [x] source lines of code (excluding blank lines and comments) in each
+  - [x] external contracts called in each
+  - [x] libraries used in each
+- [x] Describe any novel or unique curve logic or mathematical models implemented in the contracts
+- [x] Does the token conform to the ERC-20 standard? In what specific ways does it differ?
+- [x] Describe anything else that adds any special logic that makes your approach unique
+- [x] Identify any areas of specific concern in reviewing the code
+- [x] Add all of the code to this repo that you want reviewed
 - [ ] Create a PR to this repo with the above changes.
 
 ---
@@ -50,10 +50,10 @@ Under "SPONSORS ADD INFO HERE" heading below, include the following:
 - [ ] Delete this checklist.
 
 ## ⭐️ Sponsor: Contest prep
-- [ ] Make sure your code is thoroughly commented using the [NatSpec format](https://docs.soliditylang.org/en/v0.5.10/natspec-format.html#natspec-format).
-- [ ] Modify the bottom of this `README.md` file to describe how your code is supposed to work with links to any relevent documentation and any other criteria/details that the C4 Wardens should keep in mind when reviewing. ([Here's a well-constructed example.](https://github.com/code-423n4/2021-06-gro/blob/main/README.md))
+- [x] Make sure your code is thoroughly commented using the [NatSpec format](https://docs.soliditylang.org/en/v0.5.10/natspec-format.html#natspec-format).
+- [x] Modify the bottom of this `README.md` file to describe how your code is supposed to work with links to any relevent documentation and any other criteria/details that the C4 Wardens should keep in mind when reviewing. ([Here's a well-constructed example.](https://github.com/code-423n4/2021-06-gro/blob/main/README.md))
 - [ ] Please have final versions of contracts and documentation added/updated in this repo **no less than 8 hours prior to contest start time.**
-- [ ] Ensure that you have access to the _findings_ repo where issues will be submitted.
+- [x] Ensure that you have access to the _findings_ repo where issues will be submitted.
 - [ ] Promote the contest on Twitter (optional: tag in relevant protocols, etc.)
 - [ ] Share it with your own communities (blog, Discord, Telegram, email newsletters, etc.)
 - [ ] Optional: pre-record a high-level overview of your protocol (not just specific smart contract functions). This saves wardens a lot of time wading through documentation.
@@ -73,3 +73,48 @@ Under "SPONSORS ADD INFO HERE" heading below, include the following:
 This repo will be made public before the start of the contest. (C4 delete this line when made public)
 
 [ ⭐️ SPONSORS ADD INFO HERE ]
+
+PermissionlessBasicPoolFactory:  193 lines of code, 6 calls to external ERC20, 0 libraries
+VoterID:  173 lines of code, 1 call to external contract, 0 libraries
+MerkleResistor: 107 lines of code, 2 calls to external ERC20, 1 library
+MerkleVesting: 82 lines of code, 2 calls to external ERC20, 1 library
+MerkleIdentity: 81 lines of code, 3 calls to external contracts, 1 library
+MerkleDropFactory: 48 lines of code, 2 calls to external ERC20, 1 library
+SpeedBumpPriceGate: 43 lines of code, 1 call to external address, 0 libraries
+MerkleEligibility: 41 lines of code, 0 external calls, 1 library
+FixedPricePassThruGate: 27 lines of code, 1 call to external address, 0 libraries
+MerkleLib: 17 lines of code, 0 external calls, 0 libraries
+
+Total: 812 lines of code 
+
+These contracts make extensive use of merkle trees, it is advised to review this data structure before auditing. The suggested order of audit:
+
+PermissionlessBasicPoolFactory
+
+MerkleLib
+MerkleDropFactory
+MerkleVesting
+MerkleResistor
+
+MerkleIdentity
+MerkleEligibility
+FixedPricePassThruGate
+SpeedBumpPriceGate
+VoterID 
+
+They are grouped above according to application. 
+
+
+There are a couple of unusual calculations to consider. First, in MerkleResistor, the creator of a tree specifies a range of vesting schedules that the user may choose from. This is expressed as a line, a diagonal of a rectangle from (minEndTime, minTotalPayments) to (maxEndTime, maxTotalPayments). Each point on this line represents a valid end point of another line, the vesting schedule line, which is drawn from (startTime, 0) to (endTime, totalCoins). So it's just 2d linear algebra, but there's two lines working together, so it can be confusing. Additionaly, the first line has a positive slope < 1, so we have to multiply by a precision factor to simulate floating point arithmetic. The second bit of unusual math is in SpeedBumpPriceGate, in which each purchase multiplies the price by a factor (exponential increase), after which the price decays linearly. 
+
+
+A particular concern with these contracts is their largely permissionless nature. Anyone can add merkledrops or staking pools, etc. so we must consider the possibility of malicious ERC20 contracts being added. In most contracts, each user-added struct gets its own state, while global state is minimized, in order to partition any security concerns as much as possible. In the case of malicious staking pools or trees being added, our utmost concern is that the other pools/trees are unaffected. 
+
+
+Some of the contracts together form an NFT minting system. We have designed this to put NFT metadata on IPFS, because we believe this more closely matches the notion of actually owning some bit of digital whatever, instead of putting the metadata on a URL controlled by some trusted third party. We have used merkle trees to do this at scale, putting the metadata uris into a big merkle tree and burdening the end user with the gas fees to prove the validity of the metadata and associate it with their NFT. This minting suite also has a traffic light system (not included here) that warns users if they are likely to collide with others trying to mint the same token ID. This system also uses merkle trees to prove eligibility to mint, making the notion of a whitelist scalable. 
+
+
+The trio of merkle-drop merkle-vesting and merkle-resistor form another product of ours called "bank". They build upon one another, with merkle-drop being the simplest, in which tokens are allocated to many users at once via merkle tree and it is up to the user (with the help of an interface, of course) to supply the merkle proof that they are eligible to receive how many tokens. MerkleVesting builds upon this idea but adds a time lock to it, with the details of the time lock again supplied by the user and verified via merkle proof. Lastly, MerkleResistor does the same thing, but with the vesting schedule only partially specified, with the user both choosing the vesting schedule and proving the details of the vesting schedule to the contract via merkle proof. In all three of these contracts, there is no way for the contract to introspect the contents of the merkle tree at tree-creation-time, which is where the massive increase in scalability comes from. Because of this, the contracts are not able to verify any global statistics about the trees, which means that the contracts can never know if the trees have been completely exhausted or if the trees are under/over funded relative to their liabilities. Therefore each tree keeps its own balance of tokens that can be topped up by any user at any time. There is no mechanism to reclaim committed tokens to avoid the possibility of a rugpull. Fees are inserted by the frontend as an additional liability in the trees.
+
+
+
