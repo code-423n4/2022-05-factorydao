@@ -183,6 +183,8 @@ The trio of merkle-drop merkle-vesting and merkle-resistor form another product 
 The PermissionlessBasicPoolFactory is part of a product we have called "yield". It is designed to allow anyone to create a basic staking pool in which users put in one kind of token and receive any kind (and possibly multiple types) of fungible token in return, at any rate. Users can pull out anytime, the rate is a linear factor of the time and deposit size, and there is a global pro-rata fee paid from rewards. As the pools will in general not be 100% full all the time, we allow pool creators to specify a beneficiary that may receive excess rewards at the closure of a pool. Here again, pools are intended to be entirely separate, with malicious reward or deposit token contracts only affecting those pools in which they play a role. Under no circumstances should pools share funds. Since the reward rate is linear, we compute the maximum possible rewards distributed at pool-creation-time and take that from the user, returning the excess after the pool has completed. This ensures that pools are never underfunded, and in general overfunded.
 
 
+Annotated Screens for Basic Pool are available here: https://financevote.readthedocs.io/projects/yield/en/latest/content/about.html#basic-pools
+
 
 
 
