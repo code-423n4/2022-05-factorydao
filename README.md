@@ -52,7 +52,7 @@ Under "SPONSORS ADD INFO HERE" heading below, include the following:
 ## ⭐️ Sponsor: Contest prep
 - [x] Make sure your code is thoroughly commented using the [NatSpec format](https://docs.soliditylang.org/en/v0.5.10/natspec-format.html#natspec-format).
 - [x] Modify the bottom of this `README.md` file to describe how your code is supposed to work with links to any relevent documentation and any other criteria/details that the C4 Wardens should keep in mind when reviewing. ([Here's a well-constructed example.](https://github.com/code-423n4/2021-06-gro/blob/main/README.md))
-- [ ] Please have final versions of contracts and documentation added/updated in this repo **no less than 8 hours prior to contest start time.**
+- [x] Please have final versions of contracts and documentation added/updated in this repo **no less than 8 hours prior to contest start time.**
 - [x] Ensure that you have access to the _findings_ repo where issues will be submitted.
 - [ ] Promote the contest on Twitter (optional: tag in relevant protocols, etc.)
 - [ ] Share it with your own communities (blog, Discord, Telegram, email newsletters, etc.)
@@ -74,33 +74,22 @@ This repo will be made public before the start of the contest. (C4 delete this l
 
 [ ⭐️ SPONSORS ADD INFO HERE ]
 
-PermissionlessBasicPoolFactory:  193 lines of code, 6 calls to external ERC20, 0 libraries
-VoterID:  173 lines of code, 1 call to external contract, 0 libraries
-MerkleResistor: 107 lines of code, 2 calls to external ERC20, 1 library
-MerkleVesting: 82 lines of code, 2 calls to external ERC20, 1 library
-MerkleIdentity: 81 lines of code, 3 calls to external contracts, 1 library
-MerkleDropFactory: 48 lines of code, 2 calls to external ERC20, 1 library
-SpeedBumpPriceGate: 43 lines of code, 1 call to external address, 0 libraries
-MerkleEligibility: 41 lines of code, 0 external calls, 1 library
-FixedPricePassThruGate: 27 lines of code, 1 call to external address, 0 libraries
-MerkleLib: 17 lines of code, 0 external calls, 0 libraries
+- PermissionlessBasicPoolFactory:  193 lines of code, 6 calls to external ERC20, 0 libraries
 
-Total: 812 lines of code 
+- MerkleLib: 17 lines of code, 0 external calls, 0 libraries
+- MerkleDropFactory: 48 lines of code, 2 calls to external ERC20, 1 library
+- MerkleVesting: 82 lines of code, 2 calls to external ERC20, 1 library
+- MerkleResistor: 107 lines of code, 2 calls to external ERC20, 1 library
 
-These contracts make extensive use of merkle trees, it is advised to review this data structure before auditing. The suggested order of audit:
+- MerkleIdentity: 81 lines of code, 3 calls to external contracts, 1 library
+- MerkleEligibility: 41 lines of code, 0 external calls, 1 library
+- FixedPricePassThruGate: 27 lines of code, 1 call to external address, 0 libraries
+- SpeedBumpPriceGate: 43 lines of code, 1 call to external address, 0 libraries
+- VoterID:  173 lines of code, 1 call to external contract, 0 libraries
 
-PermissionlessBasicPoolFactory
+- Total: 812 lines of code 
 
-MerkleLib
-MerkleDropFactory
-MerkleVesting
-MerkleResistor
-
-MerkleIdentity
-MerkleEligibility
-FixedPricePassThruGate
-SpeedBumpPriceGate
-VoterID 
+These contracts make extensive use of merkle trees, it is advised to review this data structure before auditing. The suggested order of audit is as they are listed above.
 
 They are grouped above according to application. 
 
@@ -111,10 +100,12 @@ There are a couple of unusual calculations to consider. First, in MerkleResistor
 A particular concern with these contracts is their largely permissionless nature. Anyone can add merkledrops or staking pools, etc. so we must consider the possibility of malicious ERC20 contracts being added. In most contracts, each user-added struct gets its own state, while global state is minimized, in order to partition any security concerns as much as possible. In the case of malicious staking pools or trees being added, our utmost concern is that the other pools/trees are unaffected. 
 
 
-Some of the contracts together form an NFT minting system. We have designed this to put NFT metadata on IPFS, because we believe this more closely matches the notion of actually owning some bit of digital whatever, instead of putting the metadata on a URL controlled by some trusted third party. We have used merkle trees to do this at scale, putting the metadata uris into a big merkle tree and burdening the end user with the gas fees to prove the validity of the metadata and associate it with their NFT. This minting suite also has a traffic light system (not included here) that warns users if they are likely to collide with others trying to mint the same token ID. This system also uses merkle trees to prove eligibility to mint, making the notion of a whitelist scalable. 
+The third group of contracts together form an NFT minting system. We have designed this to put NFT metadata on IPFS, because we believe this more closely matches the notion of actually owning some bit of digital whatever, instead of putting the metadata on a URL controlled by some trusted third party. We have used merkle trees to do this at scale, putting the metadata uris into a big merkle tree and burdening the end user with the gas fees to prove the validity of the metadata and associate it with their NFT. This minting suite also has a traffic light system (not included here) that warns users if they are likely to collide with others trying to mint the same token ID. This system also uses merkle trees to prove eligibility to mint, making the notion of a whitelist scalable. 
 
 
 The trio of merkle-drop merkle-vesting and merkle-resistor form another product of ours called "bank". They build upon one another, with merkle-drop being the simplest, in which tokens are allocated to many users at once via merkle tree and it is up to the user (with the help of an interface, of course) to supply the merkle proof that they are eligible to receive how many tokens. MerkleVesting builds upon this idea but adds a time lock to it, with the details of the time lock again supplied by the user and verified via merkle proof. Lastly, MerkleResistor does the same thing, but with the vesting schedule only partially specified, with the user both choosing the vesting schedule and proving the details of the vesting schedule to the contract via merkle proof. In all three of these contracts, there is no way for the contract to introspect the contents of the merkle tree at tree-creation-time, which is where the massive increase in scalability comes from. Because of this, the contracts are not able to verify any global statistics about the trees, which means that the contracts can never know if the trees have been completely exhausted or if the trees are under/over funded relative to their liabilities. Therefore each tree keeps its own balance of tokens that can be topped up by any user at any time. There is no mechanism to reclaim committed tokens to avoid the possibility of a rugpull. Fees are inserted by the frontend as an additional liability in the trees.
 
+
+The PermissionlessBasicPoolFactory is part of a product we have called "yield". It is designed to allow anyone to create a basic staking pool in which users put in one kind of token and receive any kind (and possibly multiple types) of fungible token in return, at any rate. Users can pull out anytime, the rate is a linear factor of the time and deposit size, and there is a global pro-rata fee paid from rewards. As the pools will in general not be 100% full all the time, we allow pool creators to specify a beneficiary that may receive excess rewards at the closure of a pool. Here again, pools are intended to be entirely separate, with malicious reward or deposit token contracts only affecting those pools in which they play a role. Under no circumstances should pools share funds. Since the reward rate is linear, we compute the maximum possible rewards distributed at pool-creation-time and take that from the user, returning the excess after the pool has completed. This ensures that pools are never underfunded, and in general overfunded.
 
 
