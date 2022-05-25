@@ -221,7 +221,8 @@ contract PermissionlessBasicPoolFactory {
         uint[] memory rewardsLocal = new uint[](pool.rewardsWeiPerSecondPerToken.length);
         uint arrayLength = pool.rewardsWeiPerSecondPerToken.length;
         for (uint i; i < arrayLength; ++i) {
-            rewardsLocal[i] = (secondsDiff * pool.rewardsWeiPerSecondPerToken[i] * receipt.amountDepositedWei) / 1e18;
+            uint8 decimals = IERC20(pool.rewardTokens[i]).decimals();
+            rewardsLocal[i] = (secondsDiff * pool.rewardsWeiPerSecondPerToken[i] * receipt.amountDepositedWei) / (10**decimals);
         }
 
         return rewardsLocal;
@@ -411,8 +412,9 @@ contract PermissionlessBasicPoolFactory {
     /// @return maximumRewardAmount the theoretical maximum that will be paid from this reward token, if pool fills instantly
     function getMaximumRewards(uint poolId, uint rewardIndex) public view returns (uint) {
         Pool storage pool = pools[poolId];
+        uint8 decimals = IERC20(pool.rewardTokens[rewardIndex]).decimals();
         // rewardsPerSecondPerToken * tokens * seconds
-        return pool.rewardsWeiPerSecondPerToken[rewardIndex] * pool.maximumDepositWei * (pool.endTime - pool.startTime) / 1e18;
+        return pool.rewardsWeiPerSecondPerToken[rewardIndex] * pool.maximumDepositWei * (pool.endTime - pool.startTime) / (10**decimals);
     }
 
     /// @notice Get reward data about a pool
