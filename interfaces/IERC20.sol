@@ -6,6 +6,12 @@ pragma solidity 0.8.9;
  * @dev Interface of the ERC20 standard as defined in the EIP.
  */
 interface IERC20 {
+
+    /**
+     * @dev Returns the number of decimals used to get from human readable to machine readable
+     */
+    function decimals() external view returns (uint8);
+
     /**
      * @dev Returns the amount of tokens in existence.
      */
