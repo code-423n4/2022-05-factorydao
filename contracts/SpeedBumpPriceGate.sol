@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-pragma solidity 0.8.9;
+pragma solidity 0.8.12;
 
 import "../interfaces/IPriceGate.sol";
 
@@ -26,6 +26,11 @@ contract SpeedBumpPriceGate is IPriceGate {
     // count the gates as they come in!
     uint public numGates;
 
+    error ZeroDenominator();
+    error ZeroPriceFloor();
+    error NotEnoughETH(address from, uint price, uint paid);
+    error TransferETHFailed(address from, address to, uint amount);
+
     /// @notice Add a price gate to the list of available price gates
     /// @dev Anyone can call this, but it must be connected to MerkleIdentity via priceGateIndex to be used
     /// @dev The price increase factor is split into numerator and denominator to enable fractions (wow! I love fractions!)
@@ -34,7 +39,13 @@ contract SpeedBumpPriceGate is IPriceGate {
     /// @param priceIncrease the numerator of the factor by which the price multiplies when a purchase occurs
     /// @param priceIncreaseDenominator the denominator of the price increase factor
     /// @param beneficiary who receives the proceeds from a purchase
-    function addGate(uint priceFloor, uint priceDecay, uint priceIncrease, uint priceIncreaseDenominator, address beneficiary) external {
+    function addGate(uint priceFloor, uint priceDecay, uint priceIncrease, uint priceIncreaseDenominator, address beneficiary) external returns (uint) {
+        if (priceIncreaseDenominator == 0) {
+            revert ZeroDenominator();
+        }
+        if (priceFloor == 0) {
+            revert ZeroPriceFloor();
+        }
         // prefix operator increments then evaluates
         Gate storage gate = gates[++numGates];
         gate.priceFloor = priceFloor;
@@ -42,13 +53,14 @@ contract SpeedBumpPriceGate is IPriceGate {
         gate.priceIncreaseFactor = priceIncrease;
         gate.priceIncreaseDenominator = priceIncreaseDenominator;
         gate.beneficiary = beneficiary;
+        return numGates;
     }
 
     /// @notice Get the cost of passing thru this gate
     /// @param index which gate are we talking about?
     /// @return _ethCost the amount of ether required to pass thru this gate
-    function getCost(uint index) override public view returns (uint _ethCost) {
-        Gate memory gate = gates[index];
+    function getCost(uint index) override public view returns (uint) {
+        Gate storage gate = gates[index];
         // compute the linear decay
         uint decay = gate.decayFactor * (block.number - gate.lastPurchaseBlock);
         // gate.lastPrice - decay < gate.priceFloor (left side could underflow)
@@ -62,9 +74,11 @@ contract SpeedBumpPriceGate is IPriceGate {
     /// @notice Pass thru this gate, should be called by MerkleIndex
     /// @dev This can be called by anyone, devs can call it to test it on mainnet
     /// @param index which gate are we passing thru?
-    function passThruGate(uint index, address) override external payable {
+    function passThruGate(uint index, address sender) override external payable {
         uint price = getCost(index);
-        require(msg.value >= price, 'Please send more ETH');
+        if (msg.value < price) {
+            revert NotEnoughETH(sender, price, msg.value);
+        }
 
         // bump up the price
         Gate storage gate = gates[index];
@@ -73,11 +87,21 @@ contract SpeedBumpPriceGate is IPriceGate {
         // move up the reference
         gate.lastPurchaseBlock = block.number;
 
-        // pass thru the ether
+        // pass thru ether
         if (msg.value > 0) {
             // use .call so we can send to contracts, for example gnosis safe, re-entrance is not a threat here
-            (bool sent, bytes memory data) = gate.beneficiary.call{value: msg.value}("");
-            require(sent, 'ETH transfer failed');
+            (bool sent,) = gate.beneficiary.call{value: price}("");
+            if (sent == false) {
+                revert TransferETHFailed(address(this), gate.beneficiary, price);
+            }
+
+            uint leftover = msg.value - price;
+            if (leftover > 0) {
+                (bool sent2,) = sender.call{value: leftover}("");
+                if (sent2 == false) {
+                    revert TransferETHFailed(address(this), sender, leftover);
+                }
+            }
         }
     }
 }

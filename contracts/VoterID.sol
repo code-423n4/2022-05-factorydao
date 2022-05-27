@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-pragma solidity 0.8.9;
+pragma solidity 0.8.12;
 
 import "../interfaces/IERC721Receiver.sol";
 import "../interfaces/IVoterID.sol";
 
 /// @title A slightly modified enumerable, metadataed NFT contract, compatible with MerkleIdentity contract
 /// @author metapriest, adrian.wachel, marek.babiarz, radoslaw.gorecki
-/// @notice This contract is
 /// @dev This contract uses no subclassing to make it easier to read and reason about
 /// @dev This contract conforms to ERC721 and ERC165 but not ERC1155 because it's a crappy standard :P
 contract VoterID is IVoterID {
@@ -66,7 +65,7 @@ contract VoterID is IVoterID {
     string _symbol;
 
     // count the number of NFTs minted
-    uint public numIdentities = 0;
+    uint public numIdentities;
 
     // owner is a special name in the OpenZeppelin standard that opensea annoyingly expects for their management page
     address public _owner_;
@@ -94,10 +93,17 @@ contract VoterID is IVoterID {
     ///  The operator can manage all NFTs of the owner.
     event ApprovalForAll(address indexed owner, address indexed operator, bool approved);
 
-    modifier ownerOnly() {
-        require (msg.sender == _owner_, 'Identity: Only owner may call this');
-        _;
-    }
+    error TokenAlreadyExists(uint tokenId);
+    error OnlyMinter(address notMinter);
+    error OnlyOwner(address notOwner);
+    error InvalidToken(uint tokenId);
+    error InvalidIndex(uint tokenIndex);
+    error ZeroAddress();
+    error TokenOwnershipRequired(uint tokenId, address notOwner);
+    error UnauthorizedApproval(uint tokenId, address unauthorized);
+    error SelfApproval(uint tokenId, address owner);
+    error NFTUnreceivable(address receiver);
+    error UnapprovedTransfer(uint tokenId, address notApproved);
 
     /// @notice Whoever deploys the contract determines the name, symbol and owner. Minter should be MerkleIdentity contract
     /// @dev names are misspelled on purpose because we already have owners and _owner_ and _name and...
@@ -119,15 +125,16 @@ contract VoterID is IVoterID {
     /// @param thisOwner the owner of this particular NFT, not the owner of the contract
     /// @param thisToken the tokenId that the newly NFT will have
     /// @param uri the metadata string that this NFT will have
-    function createIdentityFor(address thisOwner, uint thisToken, string memory uri) public override {
-        require(msg.sender == _minter, 'Only minter may create identity');
-        require(owners[thisToken] == address(0), 'Token already exists');
+    function createIdentityFor(address thisOwner, uint thisToken, string calldata uri) external override {
+        if (msg.sender != _minter) {
+            revert OnlyMinter(msg.sender);
+        }
+        if (owners[thisToken] != address(0)) {
+            revert TokenAlreadyExists(thisToken);
+        }
 
         // for getTokenByIndex below, 0 based index so we do it before incrementing numIdentities
-        allTokens[numIdentities] = thisToken;
-
-        // increment the number of identities
-        numIdentities = numIdentities + 1;
+        allTokens[numIdentities++] = thisToken;
 
         // two way mapping for enumeration
         ownershipMapIndexToToken[thisOwner][balances[thisOwner]] = thisToken;
@@ -137,7 +144,7 @@ contract VoterID is IVoterID {
         // set owner of new token
         owners[thisToken] = thisOwner;
         // increment balances for owner
-        balances[thisOwner] = balances[thisOwner] + 1;
+        ++balances[thisOwner];
         uriMap[thisToken] = uri;
         emit Transfer(address(0), thisOwner, thisToken);
         emit IdentityCreated(thisOwner, thisToken);
@@ -148,7 +155,11 @@ contract VoterID is IVoterID {
     /// @notice Changing the owner key
     /// @dev Only current owner may do this
     /// @param newOwner the new address that will be owner, old address is no longer owner
-    function setOwner(address newOwner) external ownerOnly {
+    function setOwner(address newOwner) external {
+        if (msg.sender != _owner_) {
+            revert OnlyOwner(msg.sender);
+        }
+
         address oldOwner = _owner_;
         _owner_ = newOwner;
         emit OwnerUpdated(oldOwner, newOwner);
@@ -159,8 +170,20 @@ contract VoterID is IVoterID {
     /// @dev This is just a backup in case some metadata goes wrong, this is basically the only thing the owner can do
     /// @param token tokenId that we are setting metadata for
     /// @param uri metadata that will be associated to this token
-    function setTokenURI(uint token, string memory uri) external ownerOnly {
+    function setTokenURI(uint token, string calldata uri) external {
+        if (msg.sender != _owner_) {
+            revert OnlyOwner(msg.sender);
+        }
+
         uriMap[token] = uri;
+    }
+
+    function endMinting() external {
+        if (msg.sender != _owner_) {
+            revert OnlyOwner(msg.sender);
+        }
+
+        _minter = address(0);
     }
 
     /// ================= ERC 721 FUNCTIONS =============================================
@@ -171,6 +194,9 @@ contract VoterID is IVoterID {
     /// @param _address An address for whom to query the balance
     /// @return The number of NFTs owned by `owner`, possibly zero
     function balanceOf(address _address) external view returns (uint256) {
+        if (_address == address(0)) {
+            revert ZeroAddress();
+        }
         return balances[_address];
     }
 
@@ -181,7 +207,9 @@ contract VoterID is IVoterID {
     /// @return The address of the owner of the NFT
     function ownerOf(uint256 tokenId) external view returns (address)  {
         address ooner = owners[tokenId];
-        require(ooner != address(0), 'No such token');
+        if (ooner == address(0)) {
+            revert InvalidToken(tokenId);
+        }
         return ooner;
     }
 
@@ -196,7 +224,9 @@ contract VoterID is IVoterID {
     /// @param to The new owner
     /// @param tokenId The NFT to transfer
     function transferFrom(address from, address to, uint256 tokenId) public {
-        require(isApproved(msg.sender, tokenId), 'Identity: Unapproved transfer');
+        if (isApproved(msg.sender, tokenId) == false) {
+            revert UnapprovedTransfer(tokenId, msg.sender);
+        }
         transfer(from, to, tokenId);
     }
 
@@ -213,8 +243,10 @@ contract VoterID is IVoterID {
     /// @param tokenId The NFT to transfer
     /// @param data Additional data with no specified format, sent in call to `to`
     function safeTransferFrom(address from, address to, uint256 tokenId, bytes memory data) public {
+        if (checkOnERC721Received(from, to, tokenId, data) == false) {
+            revert NFTUnreceivable(to);
+        }
         transferFrom(from, to, tokenId);
-        require(checkOnERC721Received(from, to, tokenId, data), "Identity: transfer to non ERC721Receiver implementer");
     }
 
     /// @notice Transfers the ownership of an NFT from one address to another address
@@ -227,7 +259,6 @@ contract VoterID is IVoterID {
         safeTransferFrom(from, to, tokenId, '');
     }
 
-
     /// @notice Change or reaffirm the approved address for an NFT
     /// @dev The zero address indicates there is no approved address.
     ///  Throws unless `msg.sender` is the current NFT owner, or an authorized
@@ -236,8 +267,12 @@ contract VoterID is IVoterID {
     /// @param tokenId The NFT to approve
     function approve(address approved, uint256 tokenId) public {
         address holder = owners[tokenId];
-        require(isApproved(msg.sender, tokenId), 'Identity: Not authorized to approve');
-        require(holder != approved, 'Identity: Approving self not allowed');
+        if (isApproved(msg.sender, tokenId) == false) {
+            revert UnauthorizedApproval(tokenId, msg.sender);
+        }
+        if (holder == approved) {
+            revert SelfApproval(tokenId, holder);
+        }
         tokenApprovals[tokenId] = approved;
         emit Approval(holder, approved, tokenId);
     }
@@ -259,7 +294,9 @@ contract VoterID is IVoterID {
     /// @return The approved address for this NFT, or the zero address if there is none
     function getApproved(uint256 tokenId) external view returns (address) {
         address holder = owners[tokenId];
-        require(holder != address(0), 'Identity: Invalid tokenId');
+        if (holder == address(0)) {
+            revert InvalidToken(tokenId);
+        }
         return tokenApprovals[tokenId];
     }
 
@@ -302,8 +339,12 @@ contract VoterID is IVoterID {
      * @param tokenId which NFT is getting transferred
      */
     function transfer(address from, address to, uint256 tokenId) internal {
-        require(owners[tokenId] == from, "Identity: Transfer of token that is not own");
-        require(to != address(0), "Identity: transfer to the zero address");
+        if (owners[tokenId] != from) {
+            revert TokenOwnershipRequired(tokenId, from);
+        }
+        if (to == address(0)) {
+            revert ZeroAddress();
+        }
 
         // Clear approvals from the previous owner
         approve(address(0), tokenId);
@@ -336,18 +377,6 @@ contract VoterID is IVoterID {
         emit Transfer(from, to, tokenId);
     }
 
-    /// @notice Query if an address is an EOA or a contract
-    /// @dev This relies on extcodesize, an EVM command that returns 0 for EOAs
-    /// @param account the address in question
-    /// @return nonzeroSize true if there is a contract currently deployed to that address
-    function isContract(address account) internal view returns (bool) {
-
-        uint256 size;
-        // solhint-disable-next-line no-inline-assembly
-        assembly { size := extcodesize(account) }
-        return size > 0;
-    }
-
     /**
      * @dev Internal function to invoke {IERC721Receiver-onERC721Received} on a target address.
      * The call is not executed if the target address is not a contract.
@@ -361,7 +390,7 @@ contract VoterID is IVoterID {
     function checkOnERC721Received(address from, address to, uint256 tokenId, bytes memory data)
         private returns (bool)
     {
-        if (!isContract(to)) {
+        if (to.code.length == 0) {
             return true;
         }
         IERC721Receiver target = IERC721Receiver(to);
@@ -394,11 +423,13 @@ contract VoterID is IVoterID {
     /// ================= ERC721Metadata FUNCTIONS =============================================
 
     /// @notice A descriptive name for a collection of NFTs in this contract
+    /// @return name the intended name
     function name() external view returns (string memory) {
         return _name;
     }
 
     /// @notice An abbreviated name for NFTs in this contract
+    /// @return symbol the intended ticker symbol
     function symbol() external view returns (string memory) {
         return _symbol;
     }
@@ -409,6 +440,9 @@ contract VoterID is IVoterID {
     ///  Metadata JSON Schema".
     /// @return uri the tokenUri for a specific tokenId
     function tokenURI(uint256 _tokenId) external view returns (string memory) {
+        if (owners[_tokenId] == address(0)) {
+            revert InvalidToken(_tokenId);
+        }
         return uriMap[_tokenId];
     }
 
@@ -434,7 +468,9 @@ contract VoterID is IVoterID {
     /// @return The token identifier for the `_index`th NFT,
     ///  (sort order not specified)
     function tokenByIndex(uint256 _index) external view returns (uint256) {
-        require(_index < numIdentities, 'Invalid token index');
+        if (_index >= numIdentities) {
+            revert InvalidIndex(_index);
+        }
         return allTokens[_index];
     }
 
@@ -446,8 +482,12 @@ contract VoterID is IVoterID {
     /// @return The token identifier for the `_index`th NFT assigned to `_owner_`,
     ///   (sort order not specified)
     function tokenOfOwnerByIndex(address _address, uint256 _index) external view returns (uint256) {
-        require(_index < balances[_address], 'Index out of range');
-        require(_address != address(0), 'Cannot query zero address');
+        if (_index >= balances[_address]) {
+            revert InvalidIndex(_index);
+        }
+        if (_address == address(0)) {
+            revert ZeroAddress();
+        }
         return ownershipMapIndexToToken[_address][_index];
     }
 

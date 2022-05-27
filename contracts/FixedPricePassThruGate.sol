@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-pragma solidity 0.8.9;
+pragma solidity 0.8.12;
 
 import "../interfaces/IPriceGate.sol";
 
@@ -21,6 +21,9 @@ contract FixedPricePassThruGate is IPriceGate {
     // array-like map of gate structs
     mapping (uint => Gate) public gates;
 
+    error NotEnoughETH(address from, uint price, uint paid);
+    error TransferETHFailed(address from, address to, uint amount);
+
     /// @notice This adds a price gate to the list of available price gates
     /// @dev Anyone can call this, adding gates that don't get connected to merkleIndex isn't useful
     /// @param _ethCost amount of ether required to pass thru the gate
@@ -35,23 +38,34 @@ contract FixedPricePassThruGate is IPriceGate {
     /// @notice Get the cost of passing thru this gate
     /// @param index which gate are we talking about?
     /// @return _ethCost the amount of ether required to pass thru this gate
-    function getCost(uint index) override external view returns (uint _ethCost) {
-        Gate memory gate = gates[index];
-        return gate.ethCost;
+    function getCost(uint index) override external view returns (uint) {
+        return gates[index].ethCost;
     }
 
     /// @notice Pass thru this gate, should be called by MerkleIndex
     /// @dev This can be called by anyone, devs can call it to test it on mainnet
     /// @param index which gate are we passing thru?
-    function passThruGate(uint index, address) override external payable {
+    function passThruGate(uint index, address sender) override external payable {
         Gate memory gate = gates[index];
-        require(msg.value >= gate.ethCost, 'Please send more ETH');
+        if (msg.value < gate.ethCost) {
+            revert NotEnoughETH(sender, gate.ethCost, msg.value);
+        }
 
         // pass thru ether
         if (msg.value > 0) {
             // use .call so we can send to contracts, for example gnosis safe, re-entrance is not a threat here
-            (bool sent, bytes memory data) = gate.beneficiary.call{value: gate.ethCost}("");
-            require(sent, 'ETH transfer failed');
+            (bool sent,) = gate.beneficiary.call{value: gate.ethCost}("");
+            if (sent == false) {
+                revert TransferETHFailed(address(this), gate.beneficiary, gate.ethCost);
+            }
+
+            uint leftover = msg.value - gate.ethCost;
+            if (leftover > 0) {
+                (bool sent2,) = sender.call{value: leftover}("");
+                if (sent2 == false) {
+                    revert TransferETHFailed(address(this), sender, leftover);
+                }
+            }
         }
     }
 }
