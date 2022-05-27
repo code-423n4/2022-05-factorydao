@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-pragma solidity 0.8.9;
+pragma solidity 0.8.12;
 
 import "../interfaces/IERC20.sol";
 import "./MerkleLib.sol";
@@ -13,10 +13,11 @@ contract MerkleVesting {
     using MerkleLib for bytes32;
 
     // the number of vesting schedules in this contract
-    uint public numTrees = 0;
+    uint public numTrees;
     
     // this represents a single vesting schedule for a specific address
     struct Tranche {
+        address recipient;
         uint totalCoins;  // total number of coins released to an address after vesting is completed
         uint currentCoins; // how many coins are left unclaimed by this address, vested or unvested
         uint startTime; // when the vesting schedule is set to start, possibly in the past
@@ -32,16 +33,14 @@ contract MerkleVesting {
         bytes32 ipfsHash; // ipfs hash of entire dataset, used to reconstruct merkle proofs if our servers go down
         address tokenAddress; // token that the vesting schedules will be denominated in
         uint tokenBalance; // current amount of tokens deposited to this tree, used to make sure trees don't share tokens
+        uint numTranchesInitialized;
+        mapping (uint => Tranche) tranches;
+        mapping (bytes32 => bool) initialized;
     }
-
-    // initialized[recipient][treeIndex] = wasItInitialized?
-    mapping (address => mapping (uint => bool)) public initialized;
 
     // array-like sequential map for all the vesting schedules
     mapping (uint => MerkleTree) public merkleTrees;
 
-    // tranches[recipient][treeIndex] = initializedVestingSchedule
-    mapping (address => mapping (uint => Tranche)) public tranches;
 
     // every time there's a withdrawal
     event WithdrawalOccurred(uint indexed treeIndex, address indexed destination, uint numTokens, uint tokensLeft);
@@ -52,6 +51,15 @@ contract MerkleVesting {
     // every time a tree is topped up
     event TokensDeposited(uint indexed treeIndex, address indexed tokenAddress, uint amount);
 
+    event TrancheInitialized(uint indexed treeIndex, uint indexed trancheIndex, address indexed recipient);
+
+    error BadTreeIndex(uint treeIndex);
+    error AlreadyInitialized(uint treeIndex, bytes32 leaf);
+    error BadProof(uint treeIndex, bytes32 leaf, bytes32[] proof);
+    error UninitializedAccount(uint treeIndex, uint trancheIndex);
+    error AccountStillLocked(uint treeIndex, uint trancheIndex);
+    error AccountEmpty(uint treeIndex, uint trancheIndex);
+
     /// @notice Add a new merkle tree to the contract, creating a new merkle-vesting-schedule
     /// @dev Anyone may call this function, therefore we must make sure trees cannot affect each other
     /// @dev Root hash should be built from (destination, totalCoins, startTime, endTime, lockPeriodEndTime)
@@ -61,12 +69,11 @@ contract MerkleVesting {
     /// @param tokenBalance the amount of tokens user wishes to use to fund the airdrop, note trees can be under/overfunded
     function addMerkleRoot(bytes32 newRoot, bytes32 ipfsHash, address tokenAddress, uint tokenBalance) public {
         // prefix operator ++ increments then evaluates
-        merkleTrees[++numTrees] = MerkleTree(
-            newRoot,
-            ipfsHash,
-            tokenAddress,
-            0    // no funds have been allocated to the tree yet
-        );
+        MerkleTree storage tree = merkleTrees[++numTrees];
+        tree.rootHash = newRoot;
+        tree.ipfsHash = ipfsHash;
+        tree.tokenAddress = tokenAddress;
+
         // fund the tree now
         depositTokens(numTrees, tokenBalance);
         emit MerkleRootAdded(numTrees, tokenAddress, newRoot, ipfsHash);
@@ -78,16 +85,29 @@ contract MerkleVesting {
     /// @param treeIndex index into array-like map of merkleTrees
     /// @param value the amount of tokens user wishes to use to fund the airdrop, note trees can be underfunded
     function depositTokens(uint treeIndex, uint value) public {
+        if (treeIndex == 0 || treeIndex > numTrees) {
+            revert BadTreeIndex(treeIndex);
+        }
+
         // storage since we are editing
         MerkleTree storage merkleTree = merkleTrees[treeIndex];
 
-        // bookkeeping to make sure trees don't share tokens
-        merkleTree.tokenBalance += value;
+        IERC20 token = IERC20(merkleTree.tokenAddress);
+        uint balanceBefore = token.balanceOf(address(this));
 
         // transfer tokens, if this is a malicious token, then this whole tree is malicious
         // but it does not effect the other trees
-        require(IERC20(merkleTree.tokenAddress).transferFrom(msg.sender, address(this), value), "ERC20 transfer failed");
-        emit TokensDeposited(treeIndex, merkleTree.tokenAddress, value);
+        // NOTE: we don't check for success here because some tokens don't return a bool
+        // Instead we check the balance before and after, which takes care of the fee-on-transfer tokens as well
+        token.transferFrom(msg.sender, address(this), value);
+
+        uint balanceAfter = token.balanceOf(address(this));
+        // diff may be different from value here, it may even be zero if the transfer failed silently
+        uint diff = balanceAfter - balanceBefore;
+
+        // bookkeeping to make sure trees don't share tokens
+        merkleTree.tokenBalance += diff;
+        emit TokensDeposited(treeIndex, merkleTree.tokenAddress, diff);
     }
 
     /// @notice Called once per recipient of a vesting schedule to initialize the vesting schedule
@@ -101,22 +121,45 @@ contract MerkleVesting {
     /// @param endTime time vesting schedule completes, can be past or future
     /// @param lockPeriodEndTime time that coins become unlocked, can be after endTime
     /// @param proof array of hashes linking leaf hash of (destination, totalCoins, startTime, endTime, lockPeriodEndTime) to root
-    function initialize(uint treeIndex, address destination, uint totalCoins, uint startTime, uint endTime, uint lockPeriodEndTime, bytes32[] memory proof) external {
-        // must not initialize multiple times
-        require(!initialized[destination][treeIndex], "Already initialized");
+    function initialize(
+        uint treeIndex,
+        address destination,
+        uint totalCoins,
+        uint startTime,
+        uint endTime,
+        uint lockPeriodEndTime,
+        bytes32[] memory proof) external returns (uint) {
+        if (treeIndex == 0 || treeIndex > numTrees) {
+            revert BadTreeIndex(treeIndex);
+        }
+
         // leaf hash is digest of vesting schedule parameters and destination
         // NOTE: use abi.encode, not abi.encodePacked to avoid possible (but unlikely) collision
         bytes32 leaf = keccak256(abi.encode(destination, totalCoins, startTime, endTime, lockPeriodEndTime));
-        // memory because we read only
-        MerkleTree memory tree = merkleTrees[treeIndex];
+
+        // storage because it's cheaper, "memory" copies from storage to memory
+        MerkleTree storage tree = merkleTrees[treeIndex];
+
+        // must not initialize multiple times
+        if (tree.initialized[leaf]) {
+            revert AlreadyInitialized(treeIndex, leaf);
+        }
+
         // call to MerkleLib to check if the submitted data is correct
-        require(tree.rootHash.verifyProof(leaf, proof), "The proof could not be verified.");
+        if (tree.rootHash.verifyProof(leaf, proof) == false) {
+            revert BadProof(treeIndex, leaf, proof);
+        }
+
         // set initialized, preventing double initialization
-        initialized[destination][treeIndex] = true;
+        tree.initialized[leaf] = true;
+
         // precompute how many coins are released per second
+        // NOTE: should check that endTime != startTime on backend since that would revert here
         uint coinsPerSecond = totalCoins / (endTime - startTime);
+
         // create the tranche struct and assign it
-        tranches[destination][treeIndex] = Tranche(
+        tree.tranches[++tree.numTranchesInitialized] = Tranche(
+            destination,
             totalCoins,  // total coins to be released
             totalCoins,  // currentCoins starts as totalCoins
             startTime,
@@ -125,29 +168,43 @@ contract MerkleVesting {
             startTime,    // lastWithdrawal starts as startTime
             lockPeriodEndTime
         );
+
+        emit TrancheInitialized(treeIndex, tree.numTranchesInitialized, destination);
+
         // if we've passed the lock time go ahead and perform a withdrawal now
         if (lockPeriodEndTime < block.timestamp) {
-            withdraw(treeIndex, destination);
+            withdraw(treeIndex, tree.numTranchesInitialized);
         }
+        return tree.numTranchesInitialized;
     }
 
     /// @notice Claim funds as a recipient in the merkle-drop
     /// @dev Anyone may call this function for anyone else, funds go to destination regardless, it's just a question of
     /// @dev who provides the proof and pays the gas, msg.sender is not used in this function
     /// @param treeIndex index into array-like map of merkleTrees, which tree should we apply the proof to?
-    /// @param destination recipient of tokens
-    function withdraw(uint treeIndex, address destination) public {
-        // cannot withdraw from an uninitialized vesting schedule
-        require(initialized[destination][treeIndex], "You must initialize your account first.");
-        // storage because we will modify it
-        Tranche storage tranche = tranches[destination][treeIndex];
+    /// @param trancheIndex recipient of tokens
+    function withdraw(uint treeIndex, uint trancheIndex) public {
+
+        MerkleTree storage tree = merkleTrees[treeIndex];
+        Tranche storage tranche = tree.tranches[trancheIndex];
+
+        // checking this way so we don't have to recompute leaf hash
+        if (tranche.totalCoins == 0) {
+            revert UninitializedAccount(treeIndex, trancheIndex);
+        }
+
         // no withdrawals before lock time ends
-        require(block.timestamp > tranche.lockPeriodEndTime, 'Must wait until after lock period');
+        if (block.timestamp < tranche.lockPeriodEndTime) {
+            revert AccountStillLocked(treeIndex, trancheIndex);
+        }
+
         // revert if there's nothing left
-        require(tranche.currentCoins >  0, 'No coins left to withdraw');
+        if (tranche.currentCoins == 0) {
+            revert AccountEmpty(treeIndex, trancheIndex);
+        }
 
         // declaration for branched assignment
-        uint currentWithdrawal = 0;
+        uint currentWithdrawal;
 
         // if after vesting period ends, give them the remaining coins
         if (block.timestamp >= tranche.endTime) {
@@ -157,21 +214,34 @@ contract MerkleVesting {
             currentWithdrawal = (block.timestamp - tranche.lastWithdrawalTime) * tranche.coinsPerSecond;
         }
 
-        // decrease allocation of coins
-        tranche.currentCoins -= currentWithdrawal;
-        // this makes sure coins don't get double withdrawn
+        // this makes sure coins don't get double withdrawn, closes re-entrance gate
         tranche.lastWithdrawalTime = block.timestamp;
 
-        // update the tree balance so trees can't take each other's tokens
-        MerkleTree storage tree = merkleTrees[treeIndex];
-        tree.tokenBalance -= currentWithdrawal;
+        IERC20 token = IERC20(tree.tokenAddress);
+        uint balanceBefore = token.balanceOf(address(this));
 
         // Transfer the tokens, if the token contract is malicious, this will make the whole tree malicious
         // but this does not allow re-entrance due to struct updates and it does not effect other trees.
         // It is also consistent with the ethereum general security model:
         // other contracts do what they want, it's our job to protect our contract
-        IERC20(tree.tokenAddress).transfer(destination, currentWithdrawal);
-        emit WithdrawalOccurred(treeIndex, destination, currentWithdrawal, tranche.currentCoins);
+        token.transfer(tranche.recipient, currentWithdrawal);
+
+        // compute the diff in case there is a fee-on-transfer or transfer failed silently
+        uint balanceAfter = token.balanceOf(address(this));
+        uint diff = balanceBefore - balanceAfter;
+
+        // decrease allocation of coins
+        tranche.currentCoins -= diff;
+
+        // update the tree balance so trees can't take each other's tokens
+        tree.tokenBalance -= diff;
+
+        emit WithdrawalOccurred(treeIndex, tranche.recipient, diff, tranche.currentCoins);
+    }
+
+    function getTranche(uint treeIndex, uint trancheIndex) view external returns (address, uint, uint, uint, uint, uint, uint) {
+        Tranche storage tranche = merkleTrees[treeIndex].tranches[trancheIndex];
+        return (tranche.recipient, tranche.totalCoins, tranche.currentCoins, tranche.startTime, tranche.endTime, tranche.coinsPerSecond, tranche.lastWithdrawalTime);
     }
 
 }
