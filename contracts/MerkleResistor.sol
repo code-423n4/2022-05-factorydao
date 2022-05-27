@@ -64,6 +64,7 @@ contract MerkleResistor {
     event TokensDeposited(uint indexed treeIndex, address indexed tokenAddress, uint amount);
     event TrancheInitialized(uint indexed treeIndex, uint indexed trancheIndex, address indexed recipient);
 
+    error BadTreeIndex(uint treeIndex);
     error InvalidPct(uint pct);
     error IncoherentTimes(uint min, uint max);
     error AlreadyInitialized(uint treeIndex, bytes32 leaf);
@@ -112,7 +113,10 @@ contract MerkleResistor {
     /// @param treeIndex index into array-like map of merkleTrees
     /// @param value the amount of tokens user wishes to use to fund the airdrop, note trees can be under/overfunded
     function depositTokens(uint treeIndex, uint value) public {
-        // storage because we edit
+        if (treeIndex == 0 || treeIndex > numTrees) {
+            revert BadTreeIndex(treeIndex);
+        }
+
         MerkleTree storage merkleTree = merkleTrees[treeIndex];
 
         IERC20 token = IERC20(merkleTree.tokenAddress);
@@ -150,6 +154,10 @@ contract MerkleResistor {
         uint minTotalPayments,
         uint maxTotalPayments,
         bytes32[] memory proof) external returns (uint) {
+        if (treeIndex == 0 || treeIndex > numTrees) {
+            revert BadTreeIndex(treeIndex);
+        }
+
         MerkleTree storage tree = merkleTrees[treeIndex];
         // compute merkle leaf, this is first element of proof
         bytes32 leaf = keccak256(abi.encode(msg.sender, minTotalPayments, maxTotalPayments));
