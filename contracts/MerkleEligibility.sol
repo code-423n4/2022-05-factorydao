@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-pragma solidity 0.8.9;
+pragma solidity 0.8.12;
 
 import "../interfaces/IEligibility.sol";
 import "./MerkleLib.sol";
@@ -13,7 +13,7 @@ contract MerkleEligibility is IEligibility {
     using MerkleLib for bytes32;
 
     // the address of the MerkleIdentity contract
-    address public gateMaster;
+    address public immutable gateMaster;
 
     // This represents a single gate or whitelist
     struct Gate {
@@ -28,7 +28,10 @@ contract MerkleEligibility is IEligibility {
     // count withdrawals per address timesWithdrawn[gateIndex][user] = count
     mapping(uint => mapping(address => uint)) public timesWithdrawn;
     // count the gates
-    uint public numGates = 0;
+    uint public numGates;
+
+    error GateMasterOnly(address notGateMaster);
+    error IneligibleRecipient(address recipient);
 
     /// @notice Deployer connects it to MerkleIdentity
     /// @param _gateMaster address of MerkleIdentity contract, which has exclusive right to call passThruGate
@@ -42,7 +45,7 @@ contract MerkleEligibility is IEligibility {
     /// @param maxWithdrawalsAddress the maximum mints allowed per address by this gate
     /// @param maxWithdrawalsTotal the maximum mints allowed across all addresses
     /// @return index the index of the gate added
-    function addGate(bytes32 merkleRoot, uint maxWithdrawalsAddress, uint maxWithdrawalsTotal) external returns (uint index) {
+    function addGate(bytes32 merkleRoot, uint maxWithdrawalsAddress, uint maxWithdrawalsTotal) external returns (uint) {
         // increment the number of roots
         numGates += 1;
 
@@ -57,7 +60,7 @@ contract MerkleEligibility is IEligibility {
     /// @return maxWithdrawalsTotal the maximum number of withdrawals across all addresses
     /// @return totalWithdrawals the number of withdrawals already made thru this gate
     function getGate(uint index) external view returns (bytes32, uint, uint, uint) {
-        Gate memory gate = gates[index];
+        Gate storage gate = gates[index];
         return (gate.root, gate.maxWithdrawalsAddress, gate.maxWithdrawalsTotal, gate.totalWithdrawals);
     }
 
@@ -67,8 +70,8 @@ contract MerkleEligibility is IEligibility {
     /// @param recipient the address that wishes to pass thru the gate
     /// @param proof the array of hashes connecting the leaf data to the merkle root
     /// @return eligible true if recipient may pass thru gate
-    function isEligible(uint index, address recipient, bytes32[] memory proof) public override view returns (bool eligible) {
-        Gate memory gate = gates[index];
+    function isEligible(uint index, address recipient, bytes32[] calldata proof) public override view returns (bool) {
+        Gate storage gate = gates[index];
         // We need to pack the 20 bytes address to the 32 bytes value, so we call abi.encode
         bytes32 leaf = keccak256(abi.encode(recipient));
         // Check the per-address count first
@@ -82,11 +85,15 @@ contract MerkleEligibility is IEligibility {
     /// @param index which gate are we passing thru?
     /// @param recipient who is passing thru it?
     /// @param proof merkle proof of whitelist inclusion
-    function passThruGate(uint index, address recipient, bytes32[] memory proof) external override {
-        require(msg.sender == gateMaster, "Only gatemaster may call this.");
+    function passThruGate(uint index, address recipient, bytes32[] calldata proof) external override {
+        if (msg.sender != gateMaster) {
+            revert GateMasterOnly(msg.sender);
+        }
 
         // close re-entrance gate, prevent double withdrawals
-        require(isEligible(index, recipient, proof), "Address is not eligible");
+        if (isEligible(index, recipient, proof) == false) {
+            revert IneligibleRecipient(recipient);
+        }
 
         timesWithdrawn[index][recipient] += 1;
         Gate storage gate = gates[index];

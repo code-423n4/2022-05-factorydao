@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-pragma solidity 0.8.9;
+pragma solidity 0.8.12;
 
 import "../interfaces/IVoterID.sol";
 import "../interfaces/IPriceGate.sol";
@@ -41,9 +41,16 @@ contract MerkleIdentity {
     // every time a merkle tree is added
     event MerkleTreeAdded(uint indexed index, address indexed nftAddress);
 
+    error ManagementOnly(address notManagement);
+    error TreeAdderOnly(address notTreeAdder);
+    error BadMerkleIndex(uint index);
+    error BadMerkleProof(bytes32[] proof, bytes32 root);
+
     // simple call gate
     modifier managementOnly() {
-        require (msg.sender == management, 'Only management may call this');
+        if (msg.sender != management) {
+            revert ManagementOnly(msg.sender);
+        }
         _;
     }
 
@@ -93,8 +100,10 @@ contract MerkleIdentity {
         address priceGateAddress,
         address eligibilityAddress,
         uint eligibilityIndex,
-        uint priceIndex) external {
-        require(msg.sender == treeAdder, 'Only treeAdder can add trees');
+        uint priceIndex) external returns (uint) {
+        if (msg.sender != treeAdder) {
+            revert TreeAdderOnly(msg.sender);
+        }
         MerkleTree storage tree = merkleTrees[++numTrees];
         tree.metadataMerkleRoot = metadataMerkleRoot;
         tree.ipfsHash = ipfsHash;
@@ -104,6 +113,7 @@ contract MerkleIdentity {
         tree.eligibilityIndex = eligibilityIndex;
         tree.priceIndex = priceIndex;
         emit MerkleTreeAdded(numTrees, nftAddress);
+        return numTrees;
     }
 
     /// @notice Mint a new NFT
@@ -113,7 +123,7 @@ contract MerkleIdentity {
     /// @param uri the metadata uri that will be associated with the minted NFT
     /// @param addressProof merkle proof proving the presence of msg.sender's address in an eligibility merkle tree
     /// @param metadataProof sequence of hashes from leaf hash (tokenID, uri) to merkle root, proving data validity
-    function withdraw(uint merkleIndex, uint tokenId, string memory uri, bytes32[] memory addressProof, bytes32[] memory metadataProof) external payable {
+    function withdraw(uint merkleIndex, uint tokenId, string calldata uri, bytes32[] calldata addressProof, bytes32[] calldata metadataProof) external payable {
         MerkleTree storage tree = merkleTrees[merkleIndex];
         IVoterID id = IVoterID(tree.nftAddress);
 
@@ -121,10 +131,14 @@ contract MerkleIdentity {
         id.createIdentityFor(msg.sender, tokenId, uri);
 
         // check that the merkle index is real
-        require(merkleIndex <= numTrees, 'merkleIndex out of range');
+        if (merkleIndex > numTrees || merkleIndex == 0) {
+            revert BadMerkleIndex(merkleIndex);
+        }
 
         // verify that the metadata is real
-        require(verifyMetadata(tree.metadataMerkleRoot, tokenId, uri, metadataProof), "The metadata proof could not be verified");
+        if (verifyMetadata(tree.metadataMerkleRoot, tokenId, uri, metadataProof) == false) {
+            revert BadMerkleProof(metadataProof, tree.metadataMerkleRoot);
+        }
 
         // check eligibility of address
         IEligibility(tree.eligibilityAddress).passThruGate(tree.eligibilityIndex, msg.sender, addressProof);
@@ -138,9 +152,8 @@ contract MerkleIdentity {
     /// @dev This does not take tokenId as an argument, if you want different tokenIds to have different prices, use different trees
     /// @return ethCost the cost in wei of minting an NFT (could represent token cost if price gate takes tokens)
     function getPrice(uint merkleIndex) public view returns (uint) {
-        MerkleTree memory tree = merkleTrees[merkleIndex];
-        uint ethCost = IPriceGate(tree.priceGateAddress).getCost(tree.priceIndex);
-        return ethCost;
+        MerkleTree storage tree = merkleTrees[merkleIndex];
+        return IPriceGate(tree.priceGateAddress).getCost(tree.priceIndex);
     }
 
     /// @notice Is the given address eligibile to mint from the given tree
@@ -149,8 +162,8 @@ contract MerkleIdentity {
     /// @param recipient the address about which we are querying eligibility
     /// @param proof merkle proof linking recipient to eligibility merkle root
     /// @return eligibility true if recipient is currently eligible
-    function isEligible(uint merkleIndex, address recipient, bytes32[] memory proof) public view returns (bool) {
-        MerkleTree memory tree = merkleTrees[merkleIndex];
+    function isEligible(uint merkleIndex, address recipient, bytes32[] calldata proof) public view returns (bool) {
+        MerkleTree storage tree = merkleTrees[merkleIndex];
         return IEligibility(tree.eligibilityAddress).isEligible(tree.eligibilityIndex, recipient, proof);
     }
 
@@ -160,7 +173,7 @@ contract MerkleIdentity {
     /// @param tokenId index of NFT being queried
     /// @param uri intended uri of NFT being minted
     /// @param proof sequence of hashes linking leaf data to merkle root
-    function verifyMetadata(bytes32 root, uint tokenId, string memory uri, bytes32[] memory proof) public pure returns (bool) {
+    function verifyMetadata(bytes32 root, uint tokenId, string calldata uri, bytes32[] calldata proof) public pure returns (bool) {
         bytes32 leaf = keccak256(abi.encode(tokenId, uri));
         return root.verifyProof(leaf, proof);
     }
