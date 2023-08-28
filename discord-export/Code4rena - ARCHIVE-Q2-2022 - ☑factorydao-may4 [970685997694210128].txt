@@ -1,0 +1,131 @@
+==============================================================
+Guild: Code4rena
+Channel: ARCHIVE-Q2-2022 / ☑factorydao-may4
+==============================================================
+
+[05/02/2022 2:02 PM] itsmetechjay
+👋 Hello and welcome to the contest channel for the $50K DAI **FactoryDAO **contest!
+
+📆 Contest opens May 4, 2022 at 0:00 UTC and runs through May 8, 2022 at 23:59 UTC (3 days).
+
+Please give a warm welcome to the FactoryDAO team, particularly @metapriest and @mb-dev, who will be available for questions either here in the channel or via DM.
+
+We'll be posting relevant links, documentation, etc. here, so if you intend to participate in this contest, consider enabling notifications for this channel. 🐺 ⏰
+
+Contest Page:  https://code4rena.com/contests/2022-05-factorydao-contest
+
+{Embed}
+https://code4rena.com/contests/2022-05-factorydao-contest
+Code4rena FactoryDAO contest
+$50,000 DAI
+4 May 2022—8 May 2022
+Code4rena - ARCHIVE-Q2-2022 - ☑factorydao-may4 [970685997694210128].txt_Files/C4-banner-7C19B.png
+
+{Reactions}
+C4Keycap (5) 
+
+[05/04/2022 7:36 PM] scaraven
+Hi, do any tests exist for the code?
+
+{Reactions}
+‼️ (2) 
+
+[05/05/2022 12:25 AM] pedroais
+Hi any dev available ?
+
+
+[05/05/2022 11:57 AM] fufanuu
+there's no config files or anything in this repo to be able to run these contracts against tests, etc..
+
+
+[05/05/2022 11:57 AM] fufanuu
+missing truffle/brownie/embark/hardhat configs
+
+
+[05/05/2022 12:20 PM] pedroais
+
+
+{Attachments}
+Code4rena - ARCHIVE-Q2-2022 - ☑factorydao-may4 [970685997694210128].txt_Files/test_basic_pool-F0343.py
+
+
+[05/05/2022 12:20 PM] pedroais
+One of the devs gave me this in dm
+
+
+[05/05/2022 12:20 PM] pedroais
+Posting it here so I don't have an unfair advantage
+
+{Reactions}
+💜 (20) hi5 (7) thankyou (6) 👍 (4) 
+
+[05/06/2022 6:28 PM] bernd_42
+In `FixedPricePassThruGate.sol` : What is meant by `/// @notice This contract has a management key that can add new gates`? Thanks!
+
+
+[05/07/2022 6:58 AM] illilli000
+anyone able to get the tests running?:
+> _____________________________________________________________ ERROR collecting tests/test_basic_pool.py ______________________________________________________________
+> ImportError while importing test module 'tests/test_basic_pool.py'.
+> Hint: make sure your test modules/packages have valid Python names.
+> Traceback:
+> /usr/lib/python3.9/importlib/__init__.py:127: in import_module
+>     return _bootstrap._gcd_import(name[level:], package, level)
+> tests/test_basic_pool.py:3: in <module>
+>     from brownie import web3, PermissionlessBasicPoolFactory, Token
+> E   ImportError: cannot import name 'Token' from 'brownie' (.local/lib/python3.9/site-packages/brownie/__init__.py)
+
+
+[05/07/2022 6:27 PM] eccentricexit
+What was the reasoning of choosing a `mapping(uint->MerkleTree)` over a `MerkleTree[]` array in `MerkleDropFactory.sol`?
+
+
+[05/08/2022 5:03 PM] acegawd
+Any devs available for DM? @metapriest trying to msg you but your DMs are closed.
+
+
+[05/09/2022 12:02 AM] C4
+**🚨 CONTEST ALERT**
+
+@🐺wardens  The** FactoryDAO** contest is now closed! Huge thanks to everyone who participated 🔍, whether you submitted a finding or not.
+
+What's next: the FactoryDAO team will review the findings over the next couple of days, and then we'll pass them off to the judge. Keep an eye on #📢announcements for regular updates on how the contest is progressing through awarding 🤑🏆, judging 🧑‍⚖️ and reporting 📜. Feel free to ping a contest administrator if you have questions along the way!
+
+
+[05/10/2022 10:06 AM] saxenism
+Do we have any expected date of the FactoryDAO report?
+
+
+[05/10/2022 1:32 PM] itsmetechjay
+We have an ideal timeline in our docs, which is the goal we're working towards: https://docs.code4rena.com/structure/our-process.  In reality, things are slower than outlined there, but we are working on some tooling to help improve these times.
+
+Right now, the sponsor is currently reviewing the submissions and then it will get handed off to a judge. Once judging is finished and awards announced, we will start work on the report.
+
+
+[05/10/2022 1:54 PM] saxenism
+Awesome. Thanks for the update.
+
+Can you also tell how many wardens/teams submitted their findings? 😅
+
+
+[05/10/2022 2:21 PM] cloudellie
+It'll be a lot easier to do that once we get judging underway, so give us a few days and we should be able to pull that info up for you quickly. 🙂
+
+{Reactions}
+💪 (2) 
+
+[06/18/2022 8:29 AM] un_for_given
+Hi, any news about the results?
+
+
+[06/21/2022 8:16 PM] saxenism
+@CloudEllie | C4
+
+
+[07/28/2022 7:26 PM] cloudellie
+just polishing up the final details in the repot
+
+
+==============================================================
+Exported 20 message(s)
+==============================================================
